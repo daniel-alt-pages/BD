@@ -3,30 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visor de Base de Datos Conectado</title>
-    <!-- Importamos Tailwind CSS para el diseño -->
+    <title>Visor de Base de Datos (Autónomo)</title>
+    <!-- Importamos Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Importamos Papa Parse para leer archivos CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.3.0/papaparse.min.js"></script>
     <style>
+        body { font-family: 'Inter', sans-serif; }
         tbody tr:hover { background-color: #f9fafb; }
         th, td { min-width: 150px; }
-        #loading-message {
-            display: none;
-            text-align: center;
-            padding: 2rem;
-            font-size: 1.2rem;
-            color: #4B5563; /* text-gray-600 */
+        #drop-zone {
+            border: 2px dashed #cbd5e1;
+            background-color: #f8fafc;
         }
+        #drop-zone.drag-over {
+            border-color: #2563eb;
+            background-color: #eff6ff;
+        }
+        #loading-spinner { display: none; }
     </style>
 </head>
-<body class="bg-gray-100 font-sans p-4 md:p-8">
+<body class="bg-gray-100 p-4 md:p-8">
 
     <div class="container mx-auto max-w-7xl">
         
         <header class="mb-6 flex flex-col md:flex-row justify-between items-center">
             <h1 class="text-3xl font-bold text-gray-800 mb-4 md:mb-0">
-                Visor de Base de Datos Conectado
+                Visor de Base de Datos
             </h1>
             <!-- Botón de Descarga -->
             <button id="downloadBtn" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition-colors duration-200 ease-in-out" disabled>
@@ -34,17 +37,33 @@
             </button>
         </header>
 
-        <p id="file-info" class="mb-4 text-sm text-gray-500">
-            Cargando datos desde los archivos locales...
-        </p>
+        <!-- Zona para Cargar Archivo -->
+        <div id="drop-zone" class="p-8 rounded-lg text-center cursor-pointer transition-colors duration-200">
+            <input type="file" id="csvFileInput" class="hidden" accept=".csv">
+            <label for="csvFileInput" class="cursor-pointer">
+                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+                <p class="mt-2 text-sm text-gray-600">
+                    <span class="font-medium text-blue-600 hover:text-blue-500">Carga tu archivo CSV</span> (base_datos_original.csv) o arrástralo aquí.
+                </p>
+                <p class="text-xs text-gray-500">Separado por punto y coma (;) y codificado en UTF-8</p>
+            </label>
+        </div>
 
-        <!-- Mensaje de Carga -->
-        <div id="loading-message" style="display: block;">
-            <p>Cargando y combinando datos...</p>
+        <p id="file-info" class="mt-4 mb-4 text-sm text-gray-500"></p>
+
+        <!-- Spinner de Carga -->
+        <div id="loading-spinner" class="text-center p-8">
+            <svg class="animate-spin -ml-1 mr-3 h-10 w-10 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-2 text-gray-600">Procesando y combinando datos...</p>
         </div>
 
         <!-- Contenedor de la tabla -->
-        <div id="table-container" class="bg-white rounded-lg shadow-lg overflow-x-auto" style="display: none;">
+        <div id="table-container" class="bg-white rounded-lg shadow-lg overflow-x-auto hidden">
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50" id="table-header">
                     <!-- El encabezado se generará dinámicamente -->
@@ -58,109 +77,206 @@
     </div>
 
     <script>
-        // Almacenará todos los datos combinados
+        // --- BASE DE DATOS DE INVESTIGACIÓN INCRUSTADA ---
+        // (Contiene 88 empresas)
+        const researchData = new Map([
+            ["ESTYMA ESTUDIOS Y MANEJOS SA", { web: "estyma.com", email: "oficina.central@estyma.com" }],
+            ["Empaquetaduras y Empaques S.A.", { web: "empaquetadurasyempaques.com", email: "julianazapata@eyesa.com.co" }],
+            ["INDUSTRIA DE ALIMENTOS ZENU S.A.S.", { web: "zenu.com.co", email: "No encontrado" }],
+            ["HUMAX PHARMACEUTICAL S.A.", { web: "humax.com.co", email: "datospersonales@humax.com.co" }],
+            ["FLORES EL CAPIRO SA", { web: "capiro.co", email: "cmuribe@capiro.co" }],
+            ["Clinica Cardio Vid", { web: "cardiovid.org.co", email: "comunicaciones@vid.org.co" }],
+            ["COLOMBIANA DE VIGILANCIA TECNICA LTDA", { web: "covitec.com.co", email: "info@covitec.com.co" }],
+            ["Universidad Ces", { web: "ces.edu.co", email: "No encontrado" }],
+            ["CAMILO ALBERTO MEJIA Y CIA S.A.S", { web: "camejia.com", email: "llanos@camejia.com" }],
+            ["C.I. HERMECO S.A.", { web: "b2b.hermeco.com", email: "cuentaleaoffcorss@b2b.hermeco.com" }],
+            ["Alcotra Colombia S.A.S.", { web: "alcotra.com", email: "info@alcotra.com" }],
+            ["LABORATORIOS ECAR SA", { web: "ecar.com.co", email: "gestionhumana@ecar.com.co" }],
+            ["DROPOPULAR S.A.S.", { web: "No encontrado", email: "No encontrado" }],
+            ["DISTRIBUCIONES AGRALBA S.A", { web: "agralba.com", email: "info@agralba.com" }],
+            ["TRANSGRANELES S.A.S.", { web: "transgraneles.com.co", email: "servicioalcliente@solla.com" }],
+            ["Unidad Medica Y De Diagnostico S.A", { web: "unidadmedicaydiagnostico-ips.com", email: "autorizacionesumdpbs@umd.com.co" }],
+            ["Mundial de Granos y Panelas S.A.S", { web: "almin.com.co", email: "gerencia@almin.com.co" }],
+            ["COMPAÑIA DE ALIMENTOS COLOMBIANOS CALCO S.A.", { web: "crepesywaffles.com", email: "contactenos.calco@crepesywaffles.com" }],
+            ["PRODUCTORA DE INSUMOS AGROPECUARIOS SOMEX S.A.S.", { web: "somex.com.co", email: "somex@somexnutricion.com" }],
+            ["ENECON SAS", { web: "enecon.net.co", email: "enecon@enecon.net.co" }],
+            ["PPG INDUSTRIES COLOMBIA LTDA", { web: "ppgpaints.com", email: "techservicerequests@ppg.com" }],
+            ["LOCERIA COLOMBIANA S.A.S", { web: "vajillascorona.com.co", email: "servicioalclientems@corona.com.co" }],
+            ["KP EMPAQUES FLEXIBLES SAS", { web: "kpempaques.co", email: "info@kpempaques.co" }],
+            ["COMERCIALIZADORA INTERNACIONAL CARIBBEAN EXOTICS SAS", { web: "caribbeanexotics.com", email: "carex@caribbeanexotics.com" }],
+            ["ESCALAR DISTRIBUCIONES S.A.S.", { web: "escalar.com.co", email: "escalar@escalar.com.co" }],
+            ["NUTRICERES SAS", { web: "nutriceres.gov.co", email: "compras@nutriceres.gov.co" }],
+            ["ACCESORIOS Y VALVULAS APOLO SAS", { web: "todovalvulas.com", email: "comercial@todovalvulas.com" }],
+            ["OCEANIC PAINTS SAS", { web: "oceanicsa.com", email: "info@oceanicsa.com" }],
+            ["Amtex SAS", { web: "amtex-corp.com", email: "olga.lopez@amtex-corp.com" }],
+            ["EUROCERAMICA SAS", { web: "2282-co.all.biz", email: "No encontrado" }],
+            ["TERMOELECTRICA EL TESORITO SAS ESP", { web: "celsia.com", email: "notificacionesjudicialeseltesorito@celsia.com" }],
+            ["ARANGO HERMANOS SAS", { web: "arangoarango.com", email: "info@arangoarango.com" }],
+            ["TEXCOMERCIAL - TEXCO S.A.S.", { web: "texcomercial.com.co", email: "basesdedatostexco@texcomercial.com.co" }],
+            ["DISTRIKIA S.A", { web: "distrikia.com.co", email: "estamoscontigodk@distrikia.com.co" }],
+            ["TINTATEX S.A.", { web: "tintatex.co", email: "No encontrado" }],
+            ["ESTUDIO DE MODA SAS", { web: "estudiodemoda.co", email: "edmgeneral@estudiodemoda.com.co" }],
+            ["INGENIERIA Y VIAS S.A.S", { web: "ingenieriayvias.pandape.computrabajo.com", email: "shirly.rojas@ingevias.com" }],
+            ["COMERCIALIZADORA INTERNACIONAL ROCAH SAS", { web: "rocah.com.co", email: "gerencia@rocah.com.co" }],
+            ["LA SA SOCIEDAD DE APOYO AERONAUTICO S.A.", { web: "saerco.com", email: "info@saerco.com" }],
+            ["ZAPATA Y VELASQUEZ SAS", { web: "emis.com", email: "No encontrado" }],
+            ["ESPUMAS PLASTICAS SAS", { web: "comodisimos.co", email: "info@comodisimos.com.co" }],
+            ["MAQUILA INTERNACIONAL DE CONFECCION S.A.S.", { web: "veritradecorp.com", email: "info@veritrade-ltd.com" }],
+            ["Sator S.A.S", { web: "sator.com.co", email: "notificaciones@sator.com.co" }],
+            ["TRILLADORA LA MONTAÑA SAS", { web: "directoriodelllano.com", email: "transporte.montana26@gmail.com" }],
+            ["GRANIPACK SAS", { web: "granipack.com", email: "pedidosweb@granipack.com" }],
+            ["ARUS S.A.S.", { web: "arus.com.co", email: "No encontrado" }],
+            ["CRISTAR TABLETOP S.A.S", { web: "cristar.com.co", email: "mercadeo.cristar@cristar.com.co" }],
+            ["INVERSIONES FERBIENES SAS", { web: "emis.com", email: "No encontrado" }],
+            ["TRANSPORTES DE LA SIERRA S.A.S.", { web: "transdelasierra.com", email: "No encontrado" }],
+            ["INVERSIONES CANO PEREZ SAS", { web: "No encontrado", email: "No encontrado" }],
+            ["PRODUCTOS ALIMENTICIOS LAS CASERITAS SA", { web: "lascaseritas.com", email: "recepcion@lascaseritas.com.co" }],
+            ["PLASTIBOL DE COLOMBIA SAS", { web: "plastibolglobal.com", email: "info@plastibol.com" }],
+            ["BODEGA DE MODA S.A.S", { web: "bodegademoda.com", email: "info@bodegademoda.com" }],
+            ["RINCARD SAS", { web: "rohde-schwarz.com", email: "career@rohde-schwarz.com" }],
+            ["DISTRILECO CAUCASIA SAS", { web: "distrileco.com", email: "comercial@distrileco.com" }],
+            ["MONA MINAS SA COLOMBIA", { web: "No encontrado", email: "pmarin@quintanasas.com" }],
+            ["SUMMA SERVICIOS CORPORATIVOS INTEGRALES SAS", { web: "gruposumma.com.co", email: "Comunicaciones@gruposumma.com.co" }],
+            ["CI CONFECCIONES INDUSTRIALES PARA EXPORTACION SA", { web: "No encontrado", email: "No encontrado" }],
+            ["FRIGOCARNES SAS", { web: "frigocarnes.co", email: "calidad@frigocarnes.com.co" }],
+            ["CONDUGAS SA BIC", { web: "condugas.com.co", email: "No encontrado" }],
+            ["CONSTRUCTORA SUMAS & RESTAS SAS", { web: "constructorasumasyrestassas.com", email: "recepcion@csyr.com.co" }],
+            ["MEDICAL SUPP", { web: "mscorp.com.co", email: "info@mscorp.com.co" }],
+            ["COLTEJER S.A.", { web: "coltejer.com.co", email: "notificaciones@coltejer.com.co" }],
+            ["AVERY DENNISON RETAIL INFORMATION SERVICES COLOMBIA S.A.S.", { web: "label.averydennison.com", email: "ad.co@averydennison.com" }],
+            ["ORGANIZACION FERKATIO SAS", { web: "husqvarna.com", email: "ferkatio@ferkatio.com" }],
+            ["MANGLA COMBUSTIBLES SAS", { web: "No encontrado", email: "No encontrado" }],
+            ["NEGOCIOS Y REPRESENTACIONES S.A.S.", { web: "gnrepresentaciones.co", email: "ventas@gnrepresentaciones.co" }],
+            ["EVERTEC PLACETOPAY S.A.S.", { web: "placetopay.com", email: "protecciondedatos@evertecinc.com" }],
+            ["CARIBE MOTOR DE MEDELLIN S.A.S", { web: "caribemotor.com.co", email: "protecciondedatos@caribemotor.com.co" }],
+            ["DISTRIBUIDORA TROPICANA SAS", { web: "grupotropi.com", email: "info@grupotropi.com" }],
+            ["STANDARD GOLD DE COLOMBIA S.A.S", { web: "damasa.com.co", email: "info@damasa.com.co" }],
+            ["DISTRIBUIDORA COLOMBIANA DE SENTIMIENTOS DE BELLEZA S.A.S.", { web: "leonia.com", email: "No encontrado" }],
+            ["ASEAR S.A. E.S.P.", { web: "asearesp.com", email: "Asearesp@gmail.com" }],
+            ["BIOPLANTA PALMERA PARA EL DESARROLLO SAS", { web: "bioplanta.co", email: "recepcion@extractorabpd.com" }],
+            ["Agrícola Sara Palma S.A.S.", { web: "No encontrado", email: "No encontrado" }],
+            ["CONSTRUCTORA AIA SAS", { web: "aia.com.co", email: "Servicioalcliente@aia.com.co" }],
+            ["NUTRISER COLOMBIA SAS", { web: "nutriser.com.co", email: "contacto@nutriser.com.co" }],
+            ["CADENA S.A", { web: "cadena.com.co", email: "informacion@cadena.com.co" }],
+            ["DYNA Y CIA S.A", { web: "dyna.com.co", email: "info@dyna.com.co" }],
+            ["PRAGMA S.A.", { web: "pragma.co", email: "info@pragma.com.co" }],
+            ["Perez y Cardona SAS", { web: "tierragro.com", email: "protecciondedatos@tierragro.co" }],
+            ["Operaciones Generales Suramericana S.A.S.", { web: "sura.com", email: "servicioalcliente@suramericana.com.co" }],
+            ["HB FULLER COLOMBIA SAS", { web: "hbfuller.com", email: "inquiry@hbfuller.com" }],
+            ["NUVANT SAS", { web: "nuvantglobal.com", email: "latam@nuvantglobal.com" }],
+            ["INDUSTRIAS ALIMENTICIAS PERMAN SA", { web: "panperman.com", email: "contacto@panperman.com" }],
+            ["CONSULTORIA EN GESTION DE RIESGOS SURAMERICANA S.A.S.", { web: "epssura.com", email: "notificacionesjudiciales@suramericana.com.co" }],
+            ["LUM LOGISTIC S A S", { web: "lum.com.co", email: "Juan@lum.com.co" }],
+            ["CHACAM TRADING SAS", { web: "chacam.com", email: "info@chacam.com" }]
+        ]);
+        
+        // --- FIN DE LA BASE DE DATOS INCRUSTADA ---
+
         let fullDatabaseData = [];
         let tableHeaders = [];
 
-        // Nombres de los archivos
-        const baseDataFile = './base_datos_original.csv';
-        const researchDataFile = './datos_investigados.csv';
+        const fileInput = document.getElementById('csvFileInput');
+        const dropZone = document.getElementById('drop-zone');
+        const fileInfo = document.getElementById('file-info');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const tableContainer = document.getElementById('table-container');
 
-        document.addEventListener('DOMContentLoaded', () => {
-            loadAndMergeData();
-            document.getElementById('downloadBtn').addEventListener('click', downloadCSV);
-        });
+        // Event Listeners
+        fileInput.addEventListener('change', handleFile);
+        dropZone.addEventListener('dragover', handleDragOver);
+        dropZone.addEventListener('dragleave', handleDragLeave);
+        dropZone.addEventListener('drop', handleDrop);
+        downloadBtn.addEventListener('click', downloadCSV);
 
-        /**
-         * Carga y parsea un archivo CSV desde una URL.
-         * Retorna una promesa con los datos parseados.
-         */
-        function fetchAndParseCSV(url) {
-            return new Promise((resolve, reject) => {
-                Papa.parse(url, {
-                    download: true,
-                    header: true,
-                    skipEmptyLines: true,
-                    encoding: "UTF-8",
-                    delimiter: ";", // Usar punto y coma
-                    complete: results => {
-                        resolve(results.data);
-                    },
-                    error: err => {
-                        console.error(`Error al cargar ${url}:`, err);
-                        reject(err);
-                    }
-                });
-            });
+        function handleDragOver(e) {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
         }
 
-        /**
-         * Carga ambos CSVs, los combina y puebla la tabla.
-         */
-        async function loadAndMergeData() {
-            const loadingMsg = document.getElementById('loading-message');
-            const tableContainer = document.getElementById('table-container');
-            const fileInfo = document.getElementById('file-info');
+        function handleDragLeave(e) {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+        }
 
-            try {
-                // Cargar ambos archivos en paralelo
-                const [baseData, researchDataList] = await Promise.all([
-                    fetchAndParseCSV(baseDataFile),
-                    fetchAndParseCSV(researchDataFile)
-                ]);
-
-                if (!baseData || baseData.length === 0) {
-                    throw new Error("La base de datos original está vacía o no se pudo cargar.");
-                }
-
-                // Convertir los datos de investigación en un Mapa para búsqueda rápida
-                const researchMap = new Map();
-                researchDataList.forEach(item => {
-                    if (item["RAZÓN SOCIAL"]) {
-                        researchMap.set(item["RAZÓN SOCIAL"].trim(), {
-                            web: item.WEB_INVESTIGADA,
-                            email: item.EMAIL_INVESTIGADO
-                        });
-                    }
-                });
-
-                // --- Combinar los datos ---
-                tableHeaders = Object.keys(baseData[0]); 
-                fullDatabaseData = []; // Limpiar
-
-                baseData.forEach(item => {
-                    const razonSocialKey = "RAZÓN SOCIAL";
-                    const razonSocial = item[razonSocialKey] ? item[razonSocialKey].trim() : null;
-
-                    // Buscar en el mapa de investigación
-                    if (razonSocial && researchMap.has(razonSocial)) {
-                        const research = researchMap.get(razonSocial);
-                        // Rellenar los campos WEB y CORREO ELECTRONICO
-                        item.WEB = research.web;
-                        item["CORREO ELECTRONICO"] = research.email;
-                    }
-                    
-                    fullDatabaseData.push(item);
-                });
-
-                // Poblar la tabla
-                populateTable();
-
-                // Actualizar UI
-                loadingMsg.style.display = 'none';
-                tableContainer.style.display = 'block';
-                fileInfo.textContent = `Mostrando ${fullDatabaseData.length} filas combinadas.`;
-                document.getElementById('downloadBtn').disabled = false;
-
-            } catch (error) {
-                console.error("Error fatal al cargar y combinar datos:", error);
-                loadingMsg.innerHTML = `<p class="text-red-600">Error al cargar los archivos de datos. Asegúrate de que los archivos 'base_datos_original.csv' y 'datos_investigados.csv' existan.</p>`;
+        function handleDrop(e) {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                fileInput.files = files;
+                handleFile({ target: { files } });
             }
         }
 
-        /**
-         * Llena la tabla HTML con los datos combinados.
-         */
+        function handleFile(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            fileInfo.textContent = `Cargando archivo: ${file.name}...`;
+            loadingSpinner.style.display = 'block';
+            tableContainer.style.display = 'none';
+            downloadBtn.disabled = true;
+
+            // Usar Papa Parse para leer el CSV
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                encoding: "UTF-8", // Asumir UTF-8
+                delimiter: ";", // Especificar punto y coma
+                complete: processData,
+                error: handleError
+            });
+        }
+
+        function processData(results) {
+            if (!results.data || results.data.length === 0) {
+                handleError({ message: "El archivo CSV está vacío o no se pudo parsear." });
+                return;
+            }
+
+            const baseData = results.data;
+            tableHeaders = results.meta.fields;
+
+            // Asegurarnos de que las columnas WEB y CORREO ELECTRONICO existan
+            if (!tableHeaders.includes('WEB')) tableHeaders.unshift('WEB');
+            if (!tableHeaders.includes('CORREO ELECTRONICO')) tableHeaders.unshift('CORREO ELECTRONICO');
+
+            fullDatabaseData = []; // Limpiar datos anteriores
+
+            baseData.forEach(item => {
+                const razonSocialKey = "RAZÓN SOCIAL";
+                const razonSocial = item[razonSocialKey] ? item[razonSocialKey].trim() : null;
+
+                // Buscar en el mapa de investigación incrustado
+                if (razonSocial && researchData.has(razonSocial)) {
+                    const research = researchData.get(razonSocial);
+                    // Rellenar los campos WEB y CORREO ELECTRONICO
+                    item.WEB = research.web;
+                    item["CORREO ELECTRONICO"] = research.email;
+                }
+                
+                fullDatabaseData.push(item);
+            });
+
+            // Poblar la tabla
+            populateTable();
+
+            // Actualizar UI
+            loadingSpinner.style.display = 'none';
+            tableContainer.style.display = 'block';
+            fileInfo.textContent = `Mostrando ${fullDatabaseData.length} filas de ${fileInput.files[0].name}.`;
+            downloadBtn.disabled = false;
+        }
+
+        function handleError(err) {
+            loadingSpinner.style.display = 'none';
+            fileInfo.textContent = `Error al leer el archivo: ${err.message}. Asegúrate de que use ';' como delimitador.`;
+            fileInfo.classList.add('text-red-600');
+        }
+        
         function populateTable() {
             const tableHeader = document.getElementById('table-header');
             const tableBody = document.getElementById('data-table-body');
@@ -171,7 +287,11 @@
             // 1. Crear Encabezado
             const headerRow = document.createElement('tr');
             const headerClasses = "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider";
-            tableHeaders.forEach(header => {
+            
+            // Reordenar para poner WEB y CORREO al inicio
+            const orderedHeaders = ['WEB', 'CORREO ELECTRONICO'].concat(tableHeaders.filter(h => h !== 'WEB' && h !== 'CORREO ELECTRONICO'));
+
+            orderedHeaders.forEach(header => {
                 const th = document.createElement('th');
                 th.scope = "col";
                 th.className = headerClasses;
@@ -183,7 +303,7 @@
             // 2. Crear Filas de Datos
             fullDatabaseData.forEach(item => {
                 const row = document.createElement('tr');
-                tableHeaders.forEach(header => {
+                orderedHeaders.forEach(header => {
                     const cell = createTableCell(item, header);
                     row.appendChild(cell);
                 });
@@ -191,9 +311,6 @@
             });
         }
 
-        /**
-         * Crea una celda <td> para la tabla con formato especial.
-         */
         function createTableCell(item, header) {
             const cell = document.createElement('td');
             const cellValue = item[header] || '';
@@ -231,46 +348,36 @@
             return cell;
         }
 
-        /**
-         * Función para escapar datos para CSV (ahora maneja ;)
-         */
         function escapeCSV(field) {
             if (field === null || field === undefined) {
                 return '';
             }
             let str = String(field);
-            // Escapar si contiene ";", " o newline
             if (str.includes(';') || str.includes('"') || str.includes('\n')) {
                 str = `"${str.replace(/"/g, '""')}"`;
             }
             return str;
         }
 
-        /**
-         * Genera y descarga un archivo CSV con los datos actuales.
-         */
         function downloadCSV() {
-            if (fullDatabaseData.length === 0) {
-                console.warn("No hay datos para descargar.");
-                return;
-            }
+            if (fullDatabaseData.length === 0) return;
 
-            // Unir cabeceras con ;
-            let csvContent = tableHeaders.join(";") + "\n";
+            // Asegurar el orden de las cabeceras
+            const orderedHeaders = ['WEB', 'CORREO ELECTRONICO'].concat(tableHeaders.filter(h => h !== 'WEB' && h !== 'CORREO ELECTRONICO'));
+            
+            let csvContent = orderedHeaders.join(";") + "\n";
             
             fullDatabaseData.forEach(item => {
-                const row = tableHeaders.map(header => escapeCSV(item[header]));
-                // Unir filas con ;
+                const row = orderedHeaders.map(header => escapeCSV(item[header]));
                 csvContent += row.join(";") + "\n";
             });
 
-            // Añadir BOM para compatibilidad con Excel
-            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // BOM para UTF-8 Excel
             const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", "base_de_datos_combinada.csv");
+            link.setAttribute("download", "base_de_datos_actualizada.csv");
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
