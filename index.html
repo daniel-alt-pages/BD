@@ -8,12 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
      /* Estilo simple para el loader principal */
-     #root:empty + #loader {
-       display: flex;
-     }
-     #loader {
-       display: none;
-     }
+     #root:empty + #loader { display: flex; }
+     #loader { display: none; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
@@ -26,41 +22,23 @@
         <div class="text-xl font-semibold text-gray-700">Cargando plataforma...</div>
     </div>
 
-
     <!-- 3. Cargar React, ReactDOM y Babel -->
     <script src="https://unpkg.com/react@17/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js" crossorigin></script>
-    <!-- Actualizado a Babel 7 para soportar sintaxis moderna (ej. ?.) -->
     <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 
     <!-- 4. Cargar Firebase (versión 9, compatible con la sintaxis global) -->
-    <!-- Usamos una versión específica para compatibilidad en este entorno de preview -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
 
-    <!-- 
-      5. Nuestro código React. 
-      Nota: type="text/babel" le dice a Babel que transpile este bloque.
-    -->
-    <script type_disabled="text/babel" data-type="module">
-        // Hack para que Babel y los módulos funcionen juntos en este entorno
-    </script>
+    <!-- 5. Nuestro código React -->
     <script type="text/babel">
         'use strict';
 
         // --- Mapeo de dependencias a las variables globales ---
         const { useState, useEffect, useMemo, Fragment } = React;
-        
-        // Mapeamos desde la API global 'compat' de Firebase
         const { initializeApp } = firebase.app;
-        
-        // FIX: Ya no desestructuramos las funciones de auth y firestore.
-        // Las llamaremos directamente desde las instancias de servicio 'db' y 'auth'
-        // que creamos en setupFirebase.
-
-        // --- INICIO: Código de EmailDashboard.jsx ---
-        // (Aquí pegamos todo el código de nuestra app)
 
         let db;
         let auth;
@@ -72,37 +50,61 @@
          */
         const setupFirebase = async (setUserId, setAuthReady) => {
           try {
-            // Estas variables ( __firebase_config, __app_id, __initial_auth_token)
-            // son proveídas por el entorno de preview.
-            const firebaseConfig = JSON.parse(__firebase_config);
-            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
             
-            // Usamos firebase.initializeApp() de la versión 'compat'
+            // --- PEGA TU CONFIGURACIÓN DE FIREBASE AQUÍ ---
+            // 1. Ve a https://console.firebase.google.com/
+            // 2. Crea un nuevo proyecto.
+            // 3. En tu proyecto, haz clic en "Agregar app" y selecciona el ícono web (</>).
+            // 4. Dale un apodo (ej. "Plataforma Datos") y registra la app.
+            // 5. Firebase te mostrará un objeto 'firebaseConfig'. Cópialo y pégalo aquí abajo.
+            // 6. ¡IMPORTANTE! En la consola de Firebase, ve a "Authentication" -> "Sign-in method"
+            //    y HABILITA el proveedor "Anónimo".
+            // 7. Ve a "Firestore Database", crea una base de datos en modo "producción"
+            //    y en la pestaña "Reglas", cambia `allow read, write: if false;` 
+            //    por `allow read, write: if request.auth != null;` y publica.
+            
+            const firebaseConfig = {
+              apiKey: "TU_API_KEY",
+              authDomain: "TU_AUTH_DOMAIN",
+              projectId: "TU_PROJECT_ID",
+              storageBucket: "TU_STORAGE_BUCKET",
+              messagingSenderId: "TU_MESSAGING_SENDER_ID",
+              appId: "TU_APP_ID_WEB"
+            };
+            
+            // --- FIN DE LA CONFIGURACIÓN ---
+
+            if (firebaseConfig.apiKey === "TU_API_KEY") {
+                console.error("Error: Debes reemplazar la 'firebaseConfig' con tus propias claves de Firebase.");
+                // Detener la carga si la configuración no se ha cambiado
+                document.getElementById('loader').innerHTML = '<div class="text-xl font-semibold text-red-600">Error: Configuración de Firebase no encontrada.</div>';
+                return;
+            }
+
             const app = firebase.initializeApp(firebaseConfig);
             db = firebase.firestore(app);
             auth = firebase.auth(app);
-            // firebase.firestore.setLogLevel('Debug'); // Habilitar para debug detallado
+            
+            // Usamos el projectId de tu configuración para definir la ruta
+            appId = firebaseConfig.projectId;
 
-            // Llamamos a onAuthStateChanged como un método de la instancia 'auth'
             auth.onAuthStateChanged(async (user) => {
               if (user) {
-                console.log("Usuario autenticado:", user.uid);
-                collectionPath = `artifacts/${appId}/users/${user.uid}/contacts`;
+                console.log("Usuario autenticado (anónimo):", user.uid);
+                // Usamos una ruta pública basada en tu projectId
+                collectionPath = `apps/${appId}/contacts`; 
                 setUserId(user.uid);
                 setAuthReady(true);
-              } else if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                console.log("Autenticando con token personalizado...");
-                // FIX: Llamar al método en la instancia 'auth'
-                await auth.signInWithCustomToken(__initial_auth_token);
               } else {
+                // Ya no dependemos de __initial_auth_token, solo usamos anónimo
                 console.log("Autenticando anónimamente...");
-                // FIX: Llamar al método en la instancia 'auth'
                 await auth.signInAnonymously();
               }
             });
 
           } catch (error) {
             console.error("Error al inicializar Firebase:", error);
+            document.getElementById('loader').innerHTML = `<div class="text-xl font-semibold text-red-600">Error al inicializar Firebase. Revisa la consola (F12).</div>`;
           }
         };
 
@@ -138,13 +140,13 @@
             script.async = true;
             script.onload = () => console.log("Papa Parse cargado dinámicamente.");
             document.body.appendChild(script);
-            return () => {
-              // No removemos el script para que siga disponible
-            }
           }, []);
 
           // --- Configuración de la API de IA (Gemini) ---
-          const apiKey = "" // Proveída por el entorno
+          // ¡¡IMPORTANTE!! Esta clave de API también debe ser tuya.
+          // 1. Ve a https://aistudio.google.com/app/apikey
+          // 2. Crea una clave de API y pégala aquí.
+          const apiKey = "PEGA_TU_API_KEY_DE_GEMINI_AQUI"; 
           const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
           const systemPrompt = `
@@ -171,6 +173,9 @@
            * Llama a la API de Gemini para UNA SOLA empresa
            */
           const getContactForCompany = async (companyName) => {
+            if (apiKey === "PEGA_TU_API_KEY_DE_GEMINI_AQUI") {
+                throw new Error("Configura tu API Key de Gemini en el código (línea 168 aprox.)");
+            }
             const userQuery = `Encuentra el sitio web oficial y el correo de contacto para la empresa: "${companyName}"`;
 
             const payload = {
@@ -184,19 +189,16 @@
             };
 
             let response;
-            // Implementar reintento simple con backoff exponencial
             for (let i = 0; i < 3; i++) { 
               response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
               });
-              if (response.ok) break; // Éxito
+              if (response.ok) break;
               if (response.status === 429 || response.status >= 500) {
-                // Error de servidor o límite de tasa, esperar y reintentar
                 await new Promise(res => setTimeout(res, 1000 * (2 ** i)));
               } else {
-                // Otro error (ej. 400), no reintentar
                 break;
               }
             }
@@ -209,7 +211,7 @@
             if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
               const jsonText = result.candidates[0].content.parts[0].text;
               const data = JSON.parse(jsonText);
-              data.nombre = companyName; // Asegurarse que el nombre original se mantenga
+              data.nombre = companyName; 
               return data;
             } else {
               console.warn("Respuesta de la IA no tuvo contenido:", result);
@@ -222,14 +224,13 @@
            */
           const saveContactToFirestore = async (contact) => {
             try {
-              // Usamos la API 'compat'
               await db.collection(collectionPath).add({
                 nombre: contact.nombre,
                 email: contact.email || '',
                 web: contact.web || '',
                 fuente: 'Captura Web IA',
                 supervisor: contact.supervisor || '',
-                capturadoEn: firebase.firestore.Timestamp.now() // API 'compat'
+                capturadoEn: firebase.firestore.Timestamp.now()
               });
             } catch (err) {
               console.error("Error guardando contacto individual:", err);
@@ -256,7 +257,6 @@
 
             window.Papa.parse(textData, {
               header: true,
-              // FIX: Cambiado de Tab a Coma para aceptar el formato CSV
               delimiter: ",", // Separador por Coma (CSV)
               skipEmptyLines: true,
               complete: async (results) => {
@@ -293,19 +293,17 @@
                     }
                     await saveContactToFirestore(contactData);
                     
-                    // Pequeña pausa para no saturar la API
                     await new Promise(res => setTimeout(res, 500)); 
 
                   } catch (err) {
                     console.error(`Error procesando ${companyName}:`, err);
                     setError(`Error en ${companyName}: ${err.message}`);
-                    // Continuar con el siguiente
                   }
                 }
                 
                 setStatus(`Proceso completado. Se procesaron ${companies.length} empresas.`);
                 setLoading(false);
-                setTextData(''); // Limpiar el formulario
+                setTextData(''); 
               },
               error: (err) => {
                 setError(`Error al leer el texto: ${err.message}. Asegúrate que esté separado por coma (CSV).`);
@@ -318,7 +316,6 @@
             <div className="bg-white p-6 rounded-lg shadow-md mb-8">
               <h2 className="text-2xl font-semibold mb-4 text-gray-800">Enriquecedor por Lote de Texto</h2>
               <p className="text-gray-600 mb-4">
-                {/* FIX: Instrucciones actualizadas a CSV */}
                 Pega tu lista de empresas (con cabeceras `RAZÓN SOCIAL` y `SUPERVISOR`, separadas por coma (CSV)).
                 El sistema buscará el `WEB` y `CORREO ELECTRONICO` para cada una.
               </p>
@@ -330,7 +327,7 @@
                     rows="10"
                     value={textData}
                     onChange={(e) => setTextData(e.target.value)}
-                    placeholder={/* FIX: Placeholder actualizado a CSV */
+                    placeholder={
 `WEB,CORREO ELECTRONICO,EVALUACIÓN,Escriba OBSERVACIONES TEXTO,RAZÓN SOCIAL,SUPERVISOR
 ,,,,ESTYMA ESTUDIOS Y MANEJOS SA,SUPERSOCIEDADES
 ,,,,Empaquetaduras y Empaques S.A.,SUPERSOCIEDADES
@@ -373,7 +370,6 @@
 
             setLoadingDB(true);
             
-            // Usamos la API 'compat'
             const q = db.collection(collectionPath);
             
             const unsubscribe = q.onSnapshot((querySnapshot) => {
@@ -383,11 +379,9 @@
                 contactsData.push({
                   id: doc.id,
                   ...data,
-                  // Convertir Timestamp de Firebase a Date de JS
                   capturadoEn: data.capturadoEn ? data.capturadoEn.toDate() : new Date() 
                 });
               });
-              // Ordenar por fecha, más reciente primero
               contactsData.sort((a, b) => b.capturadoEn - a.capturadoEn);
               setContacts(contactsData);
               setLoadingDB(false);
@@ -396,11 +390,9 @@
               setLoadingDB(false);
             });
 
-            // Limpiar el listener al desmontar el componente
             return () => unsubscribe();
           }, [isAuthReady, userId]);
 
-          // Memoizar los contactos filtrados para mejor rendimiento
           const filteredContacts = useMemo(() => {
             const term = searchTerm.toLowerCase();
             if (!term) return contacts;
@@ -413,7 +405,6 @@
             );
           }, [contacts, searchTerm]);
 
-          // Función para exportar los datos filtrados a CSV
           const exportToCSV = () => {
             let csvContent = "data:text/csv;charset=utf-8,Nombre (Razón Social),Supervisor,Email (Encontrado),Sitio Web (Encontrado),Fuente,Fecha de Captura\n";
 
@@ -438,13 +429,9 @@
             document.body.removeChild(link);
           };
 
-          // Mostrar loader mientras se autentica
           if (!isAuthReady) {
-            return (
-              <div className="flex justify-center items-center h-screen bg-gray-100">
-                <div className="text-xl font-semibold text-gray-700">Conectando a la plataforma...</div>
-              </div>
-            );
+            // No renderizar nada, el loader global (#loader) se está mostrando
+            return null;
           }
           
           const formatWebUrl = (url) => {
@@ -455,13 +442,12 @@
             return `https://${url.replace(/^www\./i, '')}`;
           }
 
-          // Renderizar la aplicación principal
           return (
             <div className="min-h-screen bg-gray-100 p-4 sm:p-8">
               <div className="max-w-7xl mx-auto">
                 <header className="mb-6">
                   <h1 className="text-3xl font-bold text-gray-900">Plataforma de Enriquecimiento de Datos</h1>
-                  <p className="text-xs text-gray-500 mt-1">ID de sesión: {userId}</p>
+                  <p className="text-xs text-gray-500 mt-1">ID de sesión (anónimo): {userId}</p>
                 </header>
                 
                 <TextCaptureForm />
@@ -552,4 +538,3 @@
     </script>
 </body>
 </html>
-
