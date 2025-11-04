@@ -8,7 +8,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
      /* Estilo simple para el loader principal */
+     /* Oculta el loader si #root tiene contenido (React se cargó) */
+     #root:not(:empty) ~ #loader { display: none; }
+     /* Muestra el loader si #root está vacío */
      #root:empty + #loader { display: flex; }
+     /* Por defecto, el loader está oculto hasta que CSS decida */
      #loader { display: none; }
     </style>
 </head>
@@ -28,9 +32,15 @@
     <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 
     <!-- 4. Cargar Firebase (versión 9, compatible con la sintaxis global) -->
+    <!-- Usamos 'compat' para poder usar la sintaxis global firebase.firestore() -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    
+    <!-- 4.1 Cargar Papa Parse (para leer CSV/TSV) -->
+    <!-- Es mejor cargarlo aquí directamente que dinámicamente en el script de React -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
 
     <!-- 5. Nuestro código React -->
     <script type="text/babel">
@@ -38,7 +48,7 @@
 
         // --- Mapeo de dependencias a las variables globales ---
         const { useState, useEffect, useMemo, Fragment } = React;
-        const { initializeApp } = firebase.app;
+        // Nota: initializeApp y demás se usarán con el prefijo global 'firebase.'
 
         let db;
         let auth;
@@ -48,63 +58,77 @@
         /**
          * Inicializa Firebase y maneja la autenticación.
          */
-        const setupFirebase = async (setUserId, setAuthReady) => {
+        const setupFirebase = async (setUserId, setAuthReady, setGlobalError) => {
           try {
             
-            // --- PEGA TU CONFIGURACIÓN DE FIREBASE AQUÍ ---
-            // 1. Ve a https://console.firebase.google.com/
-            // 2. Crea un nuevo proyecto.
-            // 3. En tu proyecto, haz clic en "Agregar app" y selecciona el ícono web (</>).
-            // 4. Dale un apodo (ej. "Plataforma Datos") y registra la app.
-            // 5. Firebase te mostrará un objeto 'firebaseConfig'. Cópialo y pégalo aquí abajo.
-            // 6. ¡IMPORTANTE! En la consola de Firebase, ve a "Authentication" -> "Sign-in method"
-            //    y HABILITA el proveedor "Anónimo".
-            // 7. Ve a "Firestore Database", crea una base de datos en modo "producción"
-            //    y en la pestaña "Reglas", cambia `allow read, write: if false;` 
-            //    por `allow read, write: if request.auth != null;` y publica.
+            // --- USANDO CONFIGURACIÓN GLOBAL DE FIREBASE ---
+            // El entorno ya proporciona las variables __firebase_config y __app_id
             
-            const firebaseConfig = {
-              apiKey: "TU_API_KEY",
-              authDomain: "TU_AUTH_DOMAIN",
-              projectId: "TU_PROJECT_ID",
-              storageBucket: "TU_STORAGE_BUCKET",
-              messagingSenderId: "TU_MESSAGING_SENDER_ID",
-              appId: "TU_APP_ID_WEB"
-            };
+            let firebaseConfig;
+            if (typeof __firebase_config !== 'undefined' && __firebase_config !== '{}') {
+                firebaseConfig = JSON.parse(__firebase_config);
+            } else {
+                const errorMsg = "Error: No se encontró la configuración de Firebase del entorno (__firebase_config).";
+                console.error(errorMsg);
+                document.getElementById('loader').innerHTML = `<div class="p-4 text-center"><div class="text-xl font-semibold text-red-600">${errorMsg}</div></div>`;
+                setGlobalError(errorMsg);
+                return;
+            }
+            
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
             
             // --- FIN DE LA CONFIGURACIÓN ---
 
+            /* REMOVIDO: Ya no se necesita la config manual
             if (firebaseConfig.apiKey === "TU_API_KEY") {
-                console.error("Error: Debes reemplazar la 'firebaseConfig' con tus propias claves de Firebase.");
-                // Detener la carga si la configuración no se ha cambiado
-                document.getElementById('loader').innerHTML = '<div class="text-xl font-semibold text-red-600">Error: Configuración de Firebase no encontrada.</div>';
-                return;
+              const errorMsg = "Error: Debes reemplazar la 'firebaseConfig' con tus propias claves de Firebase (línea 67 aprox.)";
+              console.error(errorMsg);
+              // Detener la carga si la configuración no se ha cambiado
+              document.getElementById('loader').innerHTML = `<div class="p-4 text-center"><div class="text-xl font-semibold text-red-600">${errorMsg}</div></div>`;
+              setGlobalError(errorMsg);
+              return;
             }
+            */
 
+            // Usamos los scripts 'compat' globales, por eso 'firebase.initializeApp'
             const app = firebase.initializeApp(firebaseConfig);
             db = firebase.firestore(app);
             auth = firebase.auth(app);
             
-            // Usamos el projectId de tu configuración para definir la ruta
-            appId = firebaseConfig.projectId;
+            // Configurar nivel de log de Firestore para depuración
+            firebase.firestore.setLogLevel('debug');
 
             auth.onAuthStateChanged(async (user) => {
               if (user) {
-                console.log("Usuario autenticado (anónimo):", user.uid);
-                // Usamos una ruta pública basada en tu projectId
-                collectionPath = `apps/${appId}/contacts`; 
+                console.log("Usuario autenticado:", user.uid);
+                // Usamos la ruta de artefactos públicos
+                collectionPath = `artifacts/${appId}/public/data/contacts`; 
                 setUserId(user.uid);
                 setAuthReady(true);
               } else {
-                // Ya no dependemos de __initial_auth_token, solo usamos anónimo
-                console.log("Autenticando anónimamente...");
-                await auth.signInAnonymously();
+                // Autenticar usando el token global o anónimamente como fallback
+                try {
+                    if (typeof __initial_auth_token !== 'undefined') {
+                        console.log("Autenticando con token personalizado...");
+                        await auth.signInWithCustomToken(__initial_auth_token);
+                    } else {
+                        console.log("Autenticando anónimamente...");
+                        await auth.signInAnonymously();
+                    }
+                } catch (authError) {
+                     console.error("Error en la autenticación:", authError);
+                     const errorMsg = `Error de autenticación: ${authError.message}`;
+                     document.getElementById('loader').innerHTML = `<div class="p-4 text-center"><div class="text-xl font-semibold text-red-600">${errorMsg}</div></div>`;
+                     setGlobalError(errorMsg);
+                }
               }
             });
 
           } catch (error) {
             console.error("Error al inicializar Firebase:", error);
-            document.getElementById('loader').innerHTML = `<div class="text-xl font-semibold text-red-600">Error al inicializar Firebase. Revisa la consola (F12).</div>`;
+            const errorMsg = `Error al inicializar Firebase. Revisa la consola (F12). ${error.message}`;
+            document.getElementById('loader').innerHTML = `<div class="p-4 text-center"><div class="text-xl font-semibold text-red-600">${errorMsg}</div></div>`;
+            setGlobalError(errorMsg);
           }
         };
 
@@ -123,24 +147,11 @@
         /**
          * Procesador de Texto Copiado
          */
-        function TextCaptureForm() {
+        function TextCaptureForm({ globalError }) {
           const [textData, setTextData] = useState('');
           const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
           const [status, setStatus] = useState('');
-
-          // Cargar la librería Papa Parse para leer CSV/TSV
-          useEffect(() => {
-            if (window.Papa) {
-                console.log("Papa Parse ya estaba cargado.");
-                return;
-            }
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js';
-            script.async = true;
-            script.onload = () => console.log("Papa Parse cargado dinámicamente.");
-            document.body.appendChild(script);
-          }, []);
 
           // --- Configuración de la API de IA (Gemini) ---
           // ¡¡IMPORTANTE!! Esta clave de API también debe ser tuya.
@@ -174,7 +185,7 @@
            */
           const getContactForCompany = async (companyName) => {
             if (apiKey === "PEGA_TU_API_KEY_DE_GEMINI_AQUI") {
-                throw new Error("Configura tu API Key de Gemini en el código (línea 168 aprox.)");
+              throw new Error("Configura tu API Key de Gemini en el código (línea 189 aprox.)");
             }
             const userQuery = `Encuentra el sitio web oficial y el correo de contacto para la empresa: "${companyName}"`;
 
@@ -189,21 +200,28 @@
             };
 
             let response;
+            // Implementar reintento simple con backoff exponencial
             for (let i = 0; i < 3; i++) { 
               response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
               });
-              if (response.ok) break;
+              if (response.ok) break; // Éxito, salir del bucle
+              // Reintentar en 429 (Too Many Requests) o 5xx (Server Error)
               if (response.status === 429 || response.status >= 500) {
-                await new Promise(res => setTimeout(res, 1000 * (2 ** i)));
+                const delay = 1000 * (2 ** i); // 1s, 2s, 4s
+                console.warn(`API Rate Limit o error de servidor. Reintentando en ${delay}ms...`);
+                await new Promise(res => setTimeout(res, delay));
               } else {
+                // Otro tipo de error (ej. 400 Bad Request), no reintentar
                 break;
               }
             }
             
             if (!response.ok) {
+              const errorBody = await response.text();
+              console.error("Error API:", errorBody);
               throw new Error(`Error en la API de IA (${response.status}): ${response.statusText}`);
             }
             const result = await response.json();
@@ -211,7 +229,7 @@
             if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
               const jsonText = result.candidates[0].content.parts[0].text;
               const data = JSON.parse(jsonText);
-              data.nombre = companyName; 
+              data.nombre = companyName; // Asegurarse que el nombre original se mantenga
               return data;
             } else {
               console.warn("Respuesta de la IA no tuvo contenido:", result);
@@ -224,12 +242,14 @@
            */
           const saveContactToFirestore = async (contact) => {
             try {
+              // Usamos la sintaxis 'compat' global
               await db.collection(collectionPath).add({
                 nombre: contact.nombre,
                 email: contact.email || '',
                 web: contact.web || '',
                 fuente: 'Captura Web IA',
                 supervisor: contact.supervisor || '',
+                // Usamos la sintaxis 'compat' global
                 capturadoEn: firebase.firestore.Timestamp.now()
               });
             } catch (err) {
@@ -242,12 +262,20 @@
            */
           const handleSubmit = async (e) => {
             e.preventDefault();
+            if (globalError) {
+              setError(`Error de configuración: ${globalError}`);
+              return;
+            }
+            if (apiKey === "PEGA_TU_API_KEY_DE_GEMINI_AQUI") {
+                setError("Error: Configura tu API Key de Gemini en el código (línea 189 aprox.)");
+                return;
+            }
             if (!textData) {
               setError('Por favor, pega tus datos en el área de texto.');
               return;
             }
             if (typeof window.Papa === 'undefined') {
-              setError('La librería de parseo aún no está lista. Intenta de nuevo en 2 segundos.');
+              setError('La librería de parseo (Papa Parse) no se ha cargado. Refresca la página.');
               return;
             }
             
@@ -255,16 +283,17 @@
             setError('');
             setStatus('Iniciando procesamiento del texto...');
 
+            // Usar Papa Parse (cargado globalmente)
             window.Papa.parse(textData, {
               header: true,
               delimiter: ",", // Separador por Coma (CSV)
               skipEmptyLines: true,
               complete: async (results) => {
                 const companies = results.data;
-                if (!companies || companies.length === 0) {
-                    setError('No se encontraron datos válidos. Revisa el formato (CSV - coma) y las cabeceras.');
-                    setLoading(false);
-                    return;
+                if (!companies || companies.length === 0 || !results.meta.fields.includes("RAZÓN SOCIAL")) {
+                  setError('No se encontraron datos válidos. Revisa el formato (CSV - coma) y asegúrate que exista la cabecera "RAZÓN SOCIAL".');
+                  setLoading(false);
+                  return;
                 }
                 
                 setStatus(`Texto leído. Se encontraron ${companies.length} empresas. Empezando captura...`);
@@ -272,10 +301,10 @@
                 
                 for (const company of companies) {
                   const companyName = company["RAZÓN SOCIAL"];
-                  const supervisor = company["SUPERVISOR"];
+                  const supervisor = company["SUPERVISOR"]; // Opcional
                   
-                  if (!companyName) {
-                    console.warn("Fila omitida, no se encontró 'RAZÓN SOCIAL':", company);
+                  if (!companyName || companyName.trim() === '') {
+                    console.warn("Fila omitida, 'RAZÓN SOCIAL' está vacía:", company);
                     continue;
                   }
 
@@ -284,7 +313,7 @@
                   
                   try {
                     const contactData = await getContactForCompany(companyName);
-                    contactData.supervisor = supervisor;
+                    contactData.supervisor = supervisor; // Añadir el supervisor
                     
                     if (contactData.email || contactData.web) {
                       setStatus(`[${processedCount}/${companies.length}] Encontrado: "${companyName}". Guardando...`);
@@ -293,17 +322,20 @@
                     }
                     await saveContactToFirestore(contactData);
                     
+                    // Pausa breve para no saturar la API de IA
                     await new Promise(res => setTimeout(res, 500)); 
 
                   } catch (err) {
                     console.error(`Error procesando ${companyName}:`, err);
                     setError(`Error en ${companyName}: ${err.message}`);
+                    // Pausa más larga si hay un error (ej. rate limit)
+                    await new Promise(res => setTimeout(res, 2000));
                   }
                 }
                 
-                setStatus(`Proceso completado. Se procesaron ${companies.length} empresas.`);
+                setStatus(`Proceso completado. Se procesaron ${processedCount} empresas.`);
                 setLoading(false);
-                setTextData(''); 
+                setTextData(''); // Limpiar el formulario
               },
               error: (err) => {
                 setError(`Error al leer el texto: ${err.message}. Asegúrate que esté separado por coma (CSV).`);
@@ -338,7 +370,7 @@
                 </div>
                 <button
                   type="submit"
-                  disabled={loading || !textData}
+                  disabled={loading || !textData || !!globalError}
                   className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
                   {loading && <LoadingSpinner />}
@@ -346,6 +378,7 @@
                 </button>
                 {status && <p className="text-blue-600 text-sm mt-2 font-medium">{status}</p>}
                 {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                {globalError && !error && <p className="text-red-600 text-sm font-semibold mt-2">Error de Configuración de Firebase: La plataforma no puede conectarse a la base de datos.</p>}
               </form>
             </div>
           );
@@ -357,19 +390,27 @@
         function App() {
           const [userId, setUserId] = useState(null);
           const [isAuthReady, setAuthReady] = useState(false);
+          const [globalError, setGlobalError] = useState(null);
           const [contacts, setContacts] = useState([]);
           const [loadingDB, setLoadingDB] = useState(true);
           const [searchTerm, setSearchTerm] = useState('');
 
+          // 1. Configurar Firebase al cargar
           useEffect(() => {
-            setupFirebase(setUserId, setAuthReady);
+            setupFirebase(setUserId, setAuthReady, setGlobalError);
           }, []);
 
+          // 2. Escuchar la base de datos cuando la autenticación esté lista
           useEffect(() => {
-            if (!isAuthReady || !db || !userId) return;
+            if (!isAuthReady || !db || !userId || globalError) {
+              // Si hay un error global, no intentar cargar la DB
+              if(globalError) setLoadingDB(false);
+              return;
+            }
 
             setLoadingDB(true);
             
+            // Usamos la sintaxis 'compat' global
             const q = db.collection(collectionPath);
             
             const unsubscribe = q.onSnapshot((querySnapshot) => {
@@ -379,20 +420,25 @@
                 contactsData.push({
                   id: doc.id,
                   ...data,
+                  // Convertir Timestamp de Firebase a Date
                   capturadoEn: data.capturadoEn ? data.capturadoEn.toDate() : new Date() 
                 });
               });
+              // Ordenar por fecha, más nuevos primero
               contactsData.sort((a, b) => b.capturadoEn - a.capturadoEn);
               setContacts(contactsData);
               setLoadingDB(false);
             }, (error) => {
               console.error("Error al escuchar la colección: ", error);
+              setGlobalError("Error al leer la base de datos. ¿Configuraste las reglas de Firestore?");
               setLoadingDB(false);
             });
 
+            // Limpiar el listener al desmontar
             return () => unsubscribe();
-          }, [isAuthReady, userId]);
+          }, [isAuthReady, userId, globalError]); // Depender de estas variables
 
+          // 3. Filtrar contactos para la búsqueda (memoizado)
           const filteredContacts = useMemo(() => {
             const term = searchTerm.toLowerCase();
             if (!term) return contacts;
@@ -405,6 +451,7 @@
             );
           }, [contacts, searchTerm]);
 
+          // 4. Función para exportar a CSV
           const exportToCSV = () => {
             let csvContent = "data:text/csv;charset=utf-8,Nombre (Razón Social),Supervisor,Email (Encontrado),Sitio Web (Encontrado),Fuente,Fecha de Captura\n";
 
@@ -429,28 +476,53 @@
             document.body.removeChild(link);
           };
 
-          if (!isAuthReady) {
-            // No renderizar nada, el loader global (#loader) se está mostrando
-            return null;
-          }
-          
+          // 5. Función de ayuda para formatear URLs
           const formatWebUrl = (url) => {
             if (!url) return null;
             if (url.startsWith('http://') || url.startsWith('https://')) {
               return url;
             }
+            // Asumir https y limpiar 'www.' que a veces se duplica
             return `https://${url.replace(/^www\./i, '')}`;
           }
 
+          // No renderizar nada hasta que la autenticación esté lista
+          // (el loader global #loader se encarga)
+          if (!isAuthReady && !globalError) {
+            return null;
+          }
+          
+          // Si la autenticación falló (configuración mala), solo mostrar el error
+          if (globalError && !isAuthReady) {
+             return (
+               <div className="min-h-screen bg-gray-100 p-4 sm:p-8">
+                 <div className="max-w-7xl mx-auto">
+                   <header className="mb-6 bg-white p-6 rounded-lg shadow-md border-l-4 border-red-500">
+                     <h1 className="text-3xl font-bold text-gray-900">Plataforma de Enriquecimiento de Datos</h1>
+                     <p className="text-lg text-red-700 mt-2 font-semibold">{globalError}</p>
+                     <p className="text-gray-600 mt-1">Por favor, revisa la consola (F12) para más detalles.</p>
+                   </header>
+                 </div>
+               </div>
+             );
+          }
+
+          // Renderizado principal
           return (
             <div className="min-h-screen bg-gray-100 p-4 sm:p-8">
               <div className="max-w-7xl mx-auto">
                 <header className="mb-6">
                   <h1 className="text-3xl font-bold text-gray-900">Plataforma de Enriquecimiento de Datos</h1>
-                  <p className="text-xs text-gray-500 mt-1">ID de sesión (anónimo): {userId}</p>
+                  <p className="text-xs text-gray-500 mt-1">ID de sesión: {userId}</p>
+                  {globalError && (
+                    <div className="mt-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md">
+                      <p className="font-bold">Error</p>
+                      <p>{globalError}</p>
+                    </div>
+                  )}
                 </header>
                 
-                <TextCaptureForm />
+                <TextCaptureForm globalError={globalError} />
 
                 <div className="bg-white p-6 rounded-lg shadow-md">
                   <h2 className="text-2xl font-semibold mb-4 text-gray-800">Base de Datos en Tiempo Real</h2>
@@ -490,10 +562,17 @@
                             <td colSpan="5" className="px-6 py-4 text-center text-gray-500">Cargando base de datos...</td>
                           </tr>
                         )}
-                        {!loadingDB && contacts.length === 0 && (
+                        {!loadingDB && contacts.length === 0 && !globalError && (
                           <tr>
                             <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
                               {searchTerm ? 'No hay resultados para tu búsqueda.' : 'Pega tus datos en el formulario de arriba para comenzar.'}
+                            </td>
+                          </tr>
+                        )}
+                         {!loadingDB && filteredContacts.length === 0 && contacts.length > 0 && (
+                          <tr>
+                            <td colSpan="5" className="px-6 py-4 text-center text-gray-500">
+                              No hay resultados para tu búsqueda: "{searchTerm}"
                             </td>
                           </tr>
                         )}
@@ -501,7 +580,7 @@
                           const webUrl = formatWebUrl(contact.web);
                           return (
                             <tr key={contact.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contact.nombre || '-'}</td>
+                              <td className="px-6 py-4 whitespace-nowJrap text-sm font-medium text-gray-900">{contact.nombre || '-'}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{contact.supervisor || '-'}</td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600">
                                 {contact.email ? <a href={`mailto:${contact.email}`} className="hover:underline">{contact.email}</a> : <span className="text-gray-400">-</span>}
@@ -527,8 +606,6 @@
           );
         }
 
-        // --- FIN: Código de EmailDashboard.jsx ---
-
         // 6. Renderizar la aplicación React en el DOM
         ReactDOM.render(
           React.createElement(App),
@@ -538,3 +615,4 @@
     </script>
 </body>
 </html>
+
