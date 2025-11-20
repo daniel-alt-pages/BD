@@ -1,0 +1,342 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Save, User, Lock, FileText, Edit3, LogOut, Check, ShieldAlert, EyeOff, AlertTriangle } from 'lucide-react';
+
+// --- BASE DE DATOS SIMULADA (Mock Data) ---
+const BASE_DATOS_OFICIAL = {
+  "123456": {
+    id: "123456",
+    nombre: "Ana García",
+    cargo: "Ingeniera de Sistemas",
+    departamento: "Desarrollo",
+    fechaEmision: "2023-01-15",
+    estado: "Activo",
+    // Usamos una imagen de documento genérico en lugar de una foto de perfil
+    docUrl: "https://images.unsplash.com/photo-1618044733300-9472054094ee?q=80&w=1000&auto=format&fit=crop" 
+  },
+  "987654": {
+    id: "987654",
+    nombre: "Carlos Rodríguez",
+    cargo: "Analista de Seguridad",
+    departamento: "Infraestructura",
+    fechaEmision: "2022-11-20",
+    estado: "Pendiente",
+    docUrl: "https://images.unsplash.com/photo-1555421689-491a97ff2040?q=80&w=1000&auto=format&fit=crop"
+  }
+};
+
+export default function PlataformaGestionID() {
+  // --- ESTADOS ---
+  const [usuarioActual, setUsuarioActual] = useState(null);
+  const [inputLogin, setInputLogin] = useState("");
+  const [baseDatosLocal, setBaseDatosLocal] = useState({});
+  const [editando, setEditando] = useState(false);
+  const [datosFormulario, setDatosFormulario] = useState({});
+  const [mensaje, setMensaje] = useState("");
+  
+  // ESTADO DE SEGURIDAD: Si es true, ocultamos el contenido sensible
+  const [contenidoOculto, setContenidoOculto] = useState(false); 
+  const [alertaSeguridad, setAlertaSeguridad] = useState("");
+
+  // --- CARGA INICIAL ---
+  useEffect(() => {
+    const datosGuardados = localStorage.getItem('plataforma_credenciales_db');
+    if (datosGuardados) {
+      setBaseDatosLocal(JSON.parse(datosGuardados));
+    } else {
+      setBaseDatosLocal(BASE_DATOS_OFICIAL);
+      localStorage.setItem('plataforma_credenciales_db', JSON.stringify(BASE_DATOS_OFICIAL));
+    }
+  }, []);
+
+  // --- SISTEMA DE SEGURIDAD ACTIVA ---
+  useEffect(() => {
+    // 1. Bloquear Clic Derecho (Context Menu)
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+      setAlertaSeguridad("Menú contextual deshabilitado por seguridad.");
+      setTimeout(() => setAlertaSeguridad(""), 2000);
+    };
+
+    // 2. Detectar Teclas Prohibidas (Captura de pantalla, F12, Inspeccionar)
+    const handleKeyDown = (e) => {
+      // Detectar Tecla Impr Pant (PrintScreen)
+      if (e.key === 'PrintScreen' || e.key === 'Snapshot') {
+        setContenidoOculto(true); // Ocultar inmediatamente
+        setAlertaSeguridad("CAPTURA DETECTADA - CONTENIDO BLOQUEADO");
+        
+        // Copiar ID al portapapeles para "quemar" el intento
+        if (usuarioActual) {
+           navigator.clipboard.writeText(`ALERTA: Usuario ${usuarioActual} intentó copiar información clasificada.`);
+        }
+
+        // Restaurar después de un momento (o mantener bloqueado si prefieres)
+        setTimeout(() => setContenidoOculto(false), 4000);
+      }
+
+      // Detectar atajos de Developer Tools (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
+      if (
+        e.key === 'F12' || 
+        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+        (e.ctrlKey && e.key === 'u')
+      ) {
+        e.preventDefault();
+        setAlertaSeguridad("Herramientas de desarrollo bloqueadas.");
+        setContenidoOculto(true);
+        setTimeout(() => { setContenidoOculto(false); setAlertaSeguridad(""); }, 2000);
+      }
+    };
+
+    // 3. Detectar si la ventana pierde el foco (ej: abrir herramienta de recortes externa)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setContenidoOculto(true); // Ocultar si minimiza o cambia de tab
+      } else {
+        // Opcional: Pedir contraseña de nuevo o simplemente restaurar
+        setTimeout(() => setContenidoOculto(false), 500); 
+      }
+    };
+
+    // 4. Detectar copia al portapapeles
+    const handleCopy = (e) => {
+       e.preventDefault();
+       setAlertaSeguridad("Copia de texto prohibida.");
+       setTimeout(() => setAlertaSeguridad(""), 2000);
+    }
+
+    // Agregar Listeners
+    window.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyDown); // A veces PrintScreen dispara en up
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('copy', handleCopy);
+
+    // Estilo CSS para bloquear impresión
+    const style = document.createElement('style');
+    style.innerHTML = `
+      @media print {
+        body { display: none !important; }
+      }
+      /* Intentar deshabilitar selección de texto */
+      body {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      }
+    `;
+    document.head.appendChild(style);
+
+    return () => {
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyDown);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('copy', handleCopy);
+      document.head.removeChild(style);
+    };
+  }, [usuarioActual]);
+
+  // --- FUNCIONES LOGICA ---
+  const manejarLogin = (e) => {
+    e.preventDefault();
+    if (baseDatosLocal[inputLogin]) {
+      setUsuarioActual(inputLogin);
+      setDatosFormulario(baseDatosLocal[inputLogin]);
+      setMensaje("");
+    } else {
+      setMensaje("Error: ID no encontrado.");
+    }
+  };
+
+  const manejarLogout = () => {
+    setUsuarioActual(null);
+    setInputLogin("");
+    setEditando(false);
+    setMensaje("");
+    setContenidoOculto(false);
+  };
+
+  const manejarCambioInput = (e) => {
+    const { name, value } = e.target;
+    setDatosFormulario({ ...datosFormulario, [name]: value });
+  };
+
+  const guardarCambios = () => {
+    const nuevaDB = { ...baseDatosLocal, [usuarioActual]: datosFormulario };
+    setBaseDatosLocal(nuevaDB);
+    localStorage.setItem('plataforma_credenciales_db', JSON.stringify(nuevaDB));
+    setEditando(false);
+    setMensaje("Guardado localmente.");
+    setTimeout(() => setMensaje(""), 3000);
+  };
+
+  // --- RENDERIZADO ---
+
+  if (!usuarioActual) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 font-sans select-none">
+        <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700">
+          <div className="flex justify-center mb-6">
+            <div className="bg-red-600 p-3 rounded-full text-white animate-pulse">
+              <Lock size={32} />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-center text-white mb-2">Acceso Restringido</h2>
+          <p className="text-center text-gray-400 mb-6">Sistema de Gestión de Documentos Clasificados</p>
+          
+          <form onSubmit={manejarLogin} className="space-y-4">
+            <div>
+              <input
+                type="text"
+                value={inputLogin}
+                onChange={(e) => setInputLogin(e.target.value)}
+                placeholder="ID de Agente (Ej: 123456)"
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:ring-2 focus:ring-red-500 outline-none transition placeholder-gray-500 text-center tracking-widest"
+              />
+            </div>
+            {mensaje && <div className="text-red-400 text-sm text-center">{mensaje}</div>}
+            <button type="submit" className="w-full bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-lg transition">
+              INGRESAR
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans select-none relative">
+      
+      {/* --- CAPA DE SEGURIDAD VISUAL (Marca de Agua) --- */}
+      <div className="fixed inset-0 pointer-events-none z-0 opacity-5 flex items-center justify-center overflow-hidden">
+         <div className="transform -rotate-45 text-9xl font-black text-gray-900 whitespace-nowrap">
+            CONFIDENCIAL {usuarioActual} NO COPIAR
+         </div>
+      </div>
+
+      {/* --- ALERTA FLOTANTE DE SEGURIDAD --- */}
+      {alertaSeguridad && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-xl font-bold flex items-center gap-3 animate-bounce">
+          <ShieldAlert size={24} />
+          {alertaSeguridad}
+        </div>
+      )}
+
+      <header className="relative z-10 max-w-5xl mx-auto bg-white rounded-lg shadow-sm p-4 mb-6 flex justify-between items-center border-b-4 border-red-600">
+        <div className="flex items-center gap-3">
+          <div className="bg-gray-800 p-2 rounded text-white">
+            <User size={24} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">Visor Clasificado</h1>
+            <p className="text-xs text-red-600 font-bold flex items-center gap-1">
+              <EyeOff size={10} /> PROHIBIDA SU REPRODUCCIÓN
+            </p>
+          </div>
+        </div>
+        <button onClick={manejarLogout} className="text-gray-500 hover:text-red-600 transition flex items-center gap-1 text-sm font-medium">
+          <LogOut size={16} /> Salir
+        </button>
+      </header>
+
+      <main className="relative z-10 max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* --- VISOR DEL DOCUMENTO (Área Protegida) --- */}
+        <section className="lg:col-span-2">
+          <div className="bg-black rounded-xl shadow-2xl overflow-hidden relative h-[500px] border-4 border-gray-800">
+            
+            {/* Overlay de bloqueo (Si detecta screenshot o blur) */}
+            {contenidoOculto && (
+              <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center text-red-600 p-8 text-center">
+                <AlertTriangle size={64} className="mb-4" />
+                <h2 className="text-3xl font-black mb-2">ACCESO BLOQUEADO</h2>
+                <p className="text-white mb-6">Se ha detectado un intento de captura o inspección no autorizada.</p>
+                <div className="bg-white p-4 rounded text-black font-mono text-xl font-bold">
+                  ID RASTREO: {usuarioActual}
+                </div>
+              </div>
+            )}
+
+            {/* Contenido Real (Imagen Documento) */}
+            <div className={`w-full h-full transition-opacity duration-200 ${contenidoOculto ? 'opacity-0' : 'opacity-100'}`}>
+              <div className="absolute top-0 left-0 bg-red-600 text-white text-xs font-bold px-3 py-1 z-10">
+                TOP SECRET // NIVEL 5
+              </div>
+              
+              {/* Imagen del documento */}
+              <img 
+                src={datosFormulario.docUrl} 
+                alt="Documento Confidencial" 
+                className="w-full h-full object-contain bg-gray-900"
+                onDragStart={(e) => e.preventDefault()} // No arrastrar imagen
+              />
+              
+              {/* Marca de agua dinámica sobre la imagen */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20">
+                 <span className="text-white font-mono text-4xl transform rotate-12 font-bold border-4 border-white p-4 rounded-xl">
+                   COPIA ILEGAL - ID: {usuarioActual}
+                 </span>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* --- EDITOR DE METADATOS --- */}
+        <section className="lg:col-span-1 bg-white rounded-xl shadow-md p-6 border border-gray-200">
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
+            <h2 className="text-lg font-bold text-gray-700">Metadatos del Archivo</h2>
+            {!editando ? (
+              <button onClick={() => setEditando(true)} className="text-blue-600 hover:bg-blue-50 p-2 rounded transition">
+                <Edit3 size={18} />
+              </button>
+            ) : (
+              <span className="text-xs font-bold text-orange-500">EDITANDO</span>
+            )}
+          </div>
+
+          {mensaje && <div className="mb-4 bg-green-100 text-green-700 p-2 rounded text-sm">{mensaje}</div>}
+
+          <div className="space-y-4">
+            <div>
+               <label className="text-xs font-bold text-gray-500 uppercase">Nombre Agente</label>
+               <input type="text" name="nombre" value={datosFormulario.nombre} onChange={manejarCambioInput} disabled={!editando}
+                 className={`w-full p-2 rounded border ${editando ? 'border-blue-400' : 'bg-gray-100 border-transparent'}`} />
+            </div>
+            <div>
+               <label className="text-xs font-bold text-gray-500 uppercase">Cargo Asignado</label>
+               <input type="text" name="cargo" value={datosFormulario.cargo} onChange={manejarCambioInput} disabled={!editando}
+                 className={`w-full p-2 rounded border ${editando ? 'border-blue-400' : 'bg-gray-100 border-transparent'}`} />
+            </div>
+            <div>
+               <label className="text-xs font-bold text-gray-500 uppercase">Fecha Emisión</label>
+               <input type="date" name="fechaEmision" value={datosFormulario.fechaEmision} onChange={manejarCambioInput} disabled={!editando}
+                 className={`w-full p-2 rounded border ${editando ? 'border-blue-400' : 'bg-gray-100 border-transparent'}`} />
+            </div>
+            <div>
+               <label className="text-xs font-bold text-gray-500 uppercase">Estado Operativo</label>
+               <select name="estado" value={datosFormulario.estado} onChange={manejarCambioInput} disabled={!editando}
+                 className={`w-full p-2 rounded border ${editando ? 'border-blue-400' : 'bg-gray-100 border-transparent'}`}>
+                 <option value="Activo">Activo</option>
+                 <option value="Pendiente">Pendiente</option>
+                 <option value="Clasificado">Clasificado</option>
+               </select>
+            </div>
+          </div>
+
+          {editando && (
+            <div className="mt-6 flex gap-2">
+              <button onClick={() => { setEditando(false); setDatosFormulario(baseDatosLocal[usuarioActual]); }}
+                className="flex-1 py-2 text-gray-600 bg-gray-100 rounded hover:bg-gray-200 text-sm">Cancelar</button>
+              <button onClick={guardarCambios}
+                className="flex-1 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-bold flex items-center justify-center gap-1">
+                <Save size={16} /> Guardar
+              </button>
+            </div>
+          )}
+        </section>
+
+      </main>
+    </div>
+  );
+}
